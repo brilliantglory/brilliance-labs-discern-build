@@ -12,6 +12,7 @@ import trimesh
 SIZE = 30.0      # die edge length, mm
 CORNER_R = 3.0   # corner/edge rounding radius, mm
 DEPTH = 1.0      # engraving depth, mm
+LENS_DEPTH = 0.5 # skull eye lenses sit this far below the surface, so marker ink is protected
 CAP = 14.0       # letter cap height, mm
 PIP_D = 2.2      # dot diameter, mm
 PIP_GAP = 3.2    # dot centre spacing, mm
@@ -50,14 +51,14 @@ def robot_skull():
         (8.0, -1.4), (6.7, -3.0), (6.6, -5.6), (6.0, -8.6), (4.4, -10.1), (0, -10.5),
     ]))
     outline = head.difference(head.buffer(-1.0, join_style=2))
-    # angry, angled sockets (dark) with raised glowing lenses
-    sock_r = Polygon([(1.0, 1.9), (6.4, 3.5), (7.0, 1.5), (6.2, -0.6), (2.0, -0.9), (0.8, 0.3)])
+    # angry, angled sockets (dark) around sunken lenses, with a >= 0.8 mm moat for marker ink
+    sock_r = Polygon([(0.9, 2.3), (6.5, 3.8), (6.8, 1.6), (6.1, -0.9), (5.4, -1.3), (2.0, -1.3), (0.8, 0.4)])
     socks = unary_union([sock_r, scale(sock_r, -1, 1, origin=(0, 0))])
-    lenses = unary_union([Point(x, 1.15).buffer(1.15, 48) for x in (3.9, -3.9)])
+    lenses = unary_union([Point(x, 0.8).buffer(1.25, 64) for x in (3.8, -3.8)])
     eyes = socks.difference(lenses)
-    brow = LineString([(-8.6, 5.3), (0, 3.0), (8.6, 5.3)]).buffer(0.45, join_style=2)
+    brow = LineString([(-8.6, 5.7), (0, 3.4), (8.6, 5.7)]).buffer(0.45, join_style=2)
     nose = Polygon([(0, -1.6), (1.3, -3.7), (0.55, -4.4), (0, -3.9), (-0.55, -4.4), (-1.3, -3.7)])
-    cheeks = unary_union([LineString([(s * 6.8, -1.6), (s * 2.6, -2.9)]).buffer(0.4, cap_style=2)
+    cheeks = unary_union([LineString([(s * 6.6, -2.3), (s * 2.6, -3.3)]).buffer(0.4, cap_style=2)
                           for s in (1, -1)])
     # clenched mechanical teeth: dark mouth with two rows of block teeth left raised
     mouth = Polygon([(-3.6, -4.9), (3.6, -4.9), (3.2, -9.0), (-3.2, -9.0)])
@@ -73,16 +74,18 @@ def robot_skull():
     # hydraulic jaw pistons
     pistons = []
     for s in (1, -1):
-        pistons.append(LineString([(s * 5.2, -3.4), (s * 4.7, -7.8)]).buffer(0.4, cap_style=2))
-        pistons += [Point(s * 5.2, -3.4).buffer(0.7, 32), Point(s * 4.7, -7.8).buffer(0.7, 32)]
+        pistons.append(LineString([(s * 5.2, -3.6), (s * 4.7, -7.8)]).buffer(0.4, cap_style=2))
+        pistons += [Point(s * 5.2, -3.6).buffer(0.7, 32), Point(s * 4.7, -7.8).buffer(0.7, 32)]
     bolts = [Point(s * 4.6, 7.6).buffer(0.6, 24) for s in (1, -1)]
-    icon = unary_union([outline, eyes, brow, nose, cheeks, mouth_cut, *pistons, *bolts])
-    return center(icon.intersection(head))
+    icon = unary_union([outline, eyes, brow, nose, cheeks, mouth_cut, *pistons, *bolts]).intersection(head)
+    x0, y0, x1, y1 = icon.bounds
+    dx, dy = -(x0 + x1) / 2, -(y0 + y1) / 2
+    return [(translate(icon, dx, dy), DEPTH), (translate(lenses, dx, dy), LENS_DEPTH)]
 
 def letter_with_pips(s, count):
     """Letter raised above a row of dice dots; the dot count gives the reading order."""
     pips = [Point((i - (count - 1) / 2) * PIP_GAP, -9.4).buffer(PIP_D / 2, 48) for i in range(count)]
-    return unary_union([translate(letter(s), 0, 1.6), *pips])
+    return [(unary_union([translate(letter(s), 0, 1.6), *pips]), DEPTH)]
 
 def to_cross_section(g):
     polys = [g] if g.geom_type == "Polygon" else list(g.geoms)
@@ -116,11 +119,11 @@ def build():
     for label, dots, n, u in FACES:
         n, u = np.array(n, float), np.array(u, float)
         r = np.cross(u, n)
-        shape = robot_skull() if label == "SKULL" else letter_with_pips(label, dots)
-        cut = m3d.Manifold.extrude(to_cross_section(shape), DEPTH + 1.0).translate((0, 0, -DEPTH))
-        c = n * SIZE / 2
-        M = np.column_stack([r, u, n, c])  # local (x,y,z) -> world
-        cutters.append(cut.transform(M))
+        layers = robot_skull() if label == "SKULL" else letter_with_pips(label, dots)
+        M = np.column_stack([r, u, n, n * SIZE / 2])  # local (x,y,z) -> world
+        for shape, depth in layers:
+            cut = m3d.Manifold.extrude(to_cross_section(shape), depth + 1.0).translate((0, 0, -depth))
+            cutters.append(cut.transform(M))
     die = die - m3d.Manifold.batch_boolean(cutters, m3d.OpType.Add)
     mesh = die.to_mesh()
     return trimesh.Trimesh(mesh.vert_properties[:, :3], mesh.tri_verts)
