@@ -12,7 +12,9 @@ import trimesh
 SIZE = 30.0      # die edge length, mm
 CORNER_R = 3.0   # corner/edge rounding radius, mm
 DEPTH = 1.0      # engraving depth, mm
-CAP = 17.0       # letter cap height, mm
+CAP = 14.0       # letter cap height, mm
+PIP_D = 2.2      # dot diameter, mm
+PIP_GAP = 3.2    # dot centre spacing, mm
 FONT = FontProperties(fname="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 
 def text_shape(s):
@@ -77,6 +79,11 @@ def robot_skull():
     icon = unary_union([outline, eyes, brow, nose, cheeks, mouth_cut, *pistons, *bolts])
     return center(icon.intersection(head))
 
+def letter_with_pips(s, count):
+    """Letter raised above a row of dice dots; the dot count gives the reading order."""
+    pips = [Point((i - (count - 1) / 2) * PIP_GAP, -9.4).buffer(PIP_D / 2, 48) for i in range(count)]
+    return unary_union([translate(letter(s), 0, 1.6), *pips])
+
 def to_cross_section(g):
     polys = [g] if g.geom_type == "Polygon" else list(g.geoms)
     rings = []
@@ -92,23 +99,24 @@ def rounded_cube():
     corners = [s.translate((x, y, z)) for x in (-h, h) for y in (-h, h) for z in (-h, h)]
     return m3d.Manifold.batch_hull(corners)
 
-# face: (normal, up) — H P F L wrap the sides to read "HoPeFuL", .AI on top, skull on bottom
+# face: (label, dots, normal, up) — H P F L wrap the sides, .AI on top, skull on bottom.
+# Dots 1-5 spell out "HPFL.AI" in order; the skull is the unmarked 6.
 FACES = [
-    ("H",    (0, -1, 0), (0, 0, 1)),
-    ("P",    (1, 0, 0),  (0, 0, 1)),
-    ("F",    (0, 1, 0),  (0, 0, 1)),
-    ("L",    (-1, 0, 0), (0, 0, 1)),
-    (".AI",  (0, 0, 1),  (0, 1, 0)),
-    ("SKULL", (0, 0, -1), (0, -1, 0)),
+    ("H",     1, (0, -1, 0), (0, 0, 1)),
+    ("P",     2, (1, 0, 0),  (0, 0, 1)),
+    ("F",     3, (0, 1, 0),  (0, 0, 1)),
+    ("L",     4, (-1, 0, 0), (0, 0, 1)),
+    (".AI",   5, (0, 0, 1),  (0, 1, 0)),
+    ("SKULL", 0, (0, 0, -1), (0, -1, 0)),
 ]
 
 def build():
     die = rounded_cube()
     cutters = []
-    for label, n, u in FACES:
+    for label, dots, n, u in FACES:
         n, u = np.array(n, float), np.array(u, float)
         r = np.cross(u, n)
-        shape = robot_skull() if label == "SKULL" else letter(label)
+        shape = robot_skull() if label == "SKULL" else letter_with_pips(label, dots)
         cut = m3d.Manifold.extrude(to_cross_section(shape), DEPTH + 1.0).translate((0, 0, -DEPTH))
         c = n * SIZE / 2
         M = np.column_stack([r, u, n, c])  # local (x,y,z) -> world

@@ -5,7 +5,7 @@ from make_die import FACES, SIZE
 m = trimesh.load("hopeful_ai_die.stl")
 N = 260
 fig, axes = plt.subplots(1, 6, figsize=(18, 3.4), facecolor="white")
-for ax, (label, n, u) in zip(axes, FACES):
+for ax, (label, _, n, u) in zip(axes, FACES):
     n, u = np.array(n, float), np.array(u, float); r = np.cross(u, n)
     g = np.linspace(-SIZE/2, SIZE/2, N)
     X, Y = np.meshgrid(g, g[::-1])
